@@ -94,7 +94,7 @@ public final class ManagedChannelImplBuilder
 
 其中`resolvedResolver.provider`是根据scheme获取的`io.grpc.NameResolverProvider`。
 
-内建的只有`io.grpc.internal.DnsNameResolverProvider`和`io.grpc.xds.XdsNameResolverProvider`等。
+内建的有`io.grpc.internal.DnsNameResolverProvider`和`io.grpc.xds.XdsNameResolverProvider`等。
 
 
 ```java
@@ -148,66 +148,18 @@ final class ManagedChannelImpl extends ManagedChannel implements
 }
 ```
 
-有个重要参数`nameResolverArgs.getSynchronizationContext()`
-
-```java
-/**
- * A synchronization context is a queue of tasks that run in sequence.  It offers following
- * guarantees:
- *
- * <ul>
- *    <li>Ordering.  Tasks are run in the same order as they are submitted via {@link #execute}
- *        and {@link #executeLater}.</li>
- *    <li>Serialization.  Tasks are run in sequence and establish a happens-before relationship
- *        between them. </li>
- *    <li>Non-reentrancy.  If a task running in a synchronization context executes or schedules
- *        another task in the same synchronization context, the latter task will never run
- *        inline.  It will instead be queued and run only after the current task has returned.</li>
- * </ul>
- *
- * <p>It doesn't own any thread.  Tasks are run from caller's or caller-provided threads.
- *
- * <p>Conceptually, it is fairly accurate to think of {@code SynchronizationContext} like a cheaper
- * {@code Executors.newSingleThreadExecutor()} when used for synchronization (not long-running
- * tasks). Both use a queue for tasks that are run in order and neither guarantee that tasks have
- * completed before returning from {@code execute()}. However, the behavior does diverge if locks
- * are held when calling the context. So it is encouraged to avoid mixing locks and synchronization
- * context except via {@link #executeLater}.
- *
- * <p>This class is thread-safe.
- *
- * @since 1.17.0
- */
-@ThreadSafe
-public final class SynchronizationContext implements Executor {
-}
-```
+有个重要参数`nameResolverArgs.getSynchronizationContext()`，可以理解为轻量的`Executors.newSingleThreadExecutor()`。
 
 ## NameResolver接口
 
 ```java
 @ExperimentalApi("https://github.com/grpc/grpc-java/issues/1770")
 public abstract class NameResolver {
-  /**
-   * Returns the authority used to authenticate connections to servers.  It <strong>must</strong> be
-   * from a trusted source, because if the authority is tampered with, RPCs may be sent to the
-   * attackers which may leak sensitive user data.
-   *
-   * <p>An implementation must generate it without blocking, typically in line, and
-   * <strong>must</strong> keep it unchanged. {@code NameResolver}s created from the same factory
-   * with the same argument must return the same authority.
-   *
-   * @since 1.0.0
-   */
-  public abstract String getServiceAuthority();
 
   /**
-   * Starts the resolution. The method is not supposed to throw any exceptions. That might cause the
-   * Channel that the name resolver is serving to crash. Errors should be propagated
-   * through {@link Listener#onError}.
+   * 启动地址解析，改方法不能抛出任何异常，只能通过Listener#onError方法传递。
    * 
-   * <p>An instance may not be started more than once, by any overload of this method, even after
-   * an intervening call to {@link #shutdown}.
+   * 一个实例只会被start一次。
    *
    * @param listener used to receive updates on the target
    * @since 1.0.0
@@ -231,12 +183,7 @@ public abstract class NameResolver {
   }
 
   /**
-   * Starts the resolution. The method is not supposed to throw any exceptions. That might cause the
-   * Channel that the name resolver is serving to crash. Errors should be propagated
-   * through {@link Listener2#onError}.
-   * 
-   * <p>An instance may not be started more than once, by any overload of this method, even after
-   * an intervening call to {@link #shutdown}.
+   * 同上
    *
    * @param listener used to receive updates on the target
    * @since 1.21.0
@@ -253,14 +200,13 @@ public abstract class NameResolver {
   public abstract void shutdown();
 
   /**
-   * Re-resolve the name.
+   * 重新解析地址
    *
-   * <p>Can only be called after {@link #start} has been called.
+   * 只能在start之后调用
    *
-   * <p>This is only a hint. Implementation takes it as a signal but may not start resolution
-   * immediately. It should never throw.
+   * 这只是个信号，而不是直接进行地址解析。这个也不能抛出异常
    *
-   * <p>The default implementation is no-op.
+   * 默认的实现是什么都不做
    *
    * @since 1.0.0
    */
@@ -324,7 +270,7 @@ final class ManagedChannelImpl extends ManagedChannel implements
 }
 ```
 
-start方法不能抛出任何异常，如果有异常改为调用listener的onError方法。
+控制start方法只能被调用一次的居然是`lbHelper`的构建，给一个明确的标识可能会更清晰。
 
 ## NameResolverListener
 
@@ -345,113 +291,6 @@ start方法不能抛出任何异常，如果有异常改为调用listener的onEr
         @SuppressWarnings("ReferenceEquality")
         @Override
         public void run() {
-          if (ManagedChannelImpl.this.nameResolver != resolver) {
-            return;
-          }
-
-          List<EquivalentAddressGroup> servers = resolutionResult.getAddresses();
-          channelLogger.log(
-              ChannelLogLevel.DEBUG,
-              "Resolved address: {0}, config={1}",
-              servers,
-              resolutionResult.getAttributes());
-
-          if (lastResolutionState != ResolutionState.SUCCESS) {
-            channelLogger.log(ChannelLogLevel.INFO, "Address resolved: {0}", servers);
-            lastResolutionState = ResolutionState.SUCCESS;
-          }
-
-          ConfigOrError configOrError = resolutionResult.getServiceConfig();
-          ResolutionResultListener resolutionResultListener = resolutionResult.getAttributes()
-              .get(RetryingNameResolver.RESOLUTION_RESULT_LISTENER_KEY);
-          InternalConfigSelector resolvedConfigSelector =
-              resolutionResult.getAttributes().get(InternalConfigSelector.KEY);
-          ManagedChannelServiceConfig validServiceConfig =
-              configOrError != null && configOrError.getConfig() != null
-                  ? (ManagedChannelServiceConfig) configOrError.getConfig()
-                  : null;
-          Status serviceConfigError = configOrError != null ? configOrError.getError() : null;
-
-          ManagedChannelServiceConfig effectiveServiceConfig;
-          if (!lookUpServiceConfig) {
-            if (validServiceConfig != null) {
-              channelLogger.log(
-                  ChannelLogLevel.INFO,
-                  "Service config from name resolver discarded by channel settings");
-            }
-            effectiveServiceConfig =
-                defaultServiceConfig == null ? EMPTY_SERVICE_CONFIG : defaultServiceConfig;
-            if (resolvedConfigSelector != null) {
-              channelLogger.log(
-                  ChannelLogLevel.INFO,
-                  "Config selector from name resolver discarded by channel settings");
-            }
-            realChannel.updateConfigSelector(effectiveServiceConfig.getDefaultConfigSelector());
-          } else {
-            // Try to use config if returned from name resolver
-            // Otherwise, try to use the default config if available
-            if (validServiceConfig != null) {
-              effectiveServiceConfig = validServiceConfig;
-              if (resolvedConfigSelector != null) {
-                realChannel.updateConfigSelector(resolvedConfigSelector);
-                if (effectiveServiceConfig.getDefaultConfigSelector() != null) {
-                  channelLogger.log(
-                      ChannelLogLevel.DEBUG,
-                      "Method configs in service config will be discarded due to presence of"
-                          + "config-selector");
-                }
-              } else {
-                realChannel.updateConfigSelector(effectiveServiceConfig.getDefaultConfigSelector());
-              }
-            } else if (defaultServiceConfig != null) {
-              effectiveServiceConfig = defaultServiceConfig;
-              realChannel.updateConfigSelector(effectiveServiceConfig.getDefaultConfigSelector());
-              channelLogger.log(
-                  ChannelLogLevel.INFO,
-                  "Received no service config, using default service config");
-            } else if (serviceConfigError != null) {
-              if (!serviceConfigUpdated) {
-                // First DNS lookup has invalid service config, and cannot fall back to default
-                channelLogger.log(
-                    ChannelLogLevel.INFO,
-                    "Fallback to error due to invalid first service config without default config");
-                // This error could be an "inappropriate" control plane error that should not bleed
-                // through to client code using gRPC. We let them flow through here to the LB as
-                // we later check for these error codes when investigating pick results in
-                // GrpcUtil.getTransportFromPickResult().
-                onError(configOrError.getError());
-                if (resolutionResultListener != null) {
-                  resolutionResultListener.resolutionAttempted(configOrError.getError());
-                }
-                return;
-              } else {
-                effectiveServiceConfig = lastServiceConfig;
-              }
-            } else {
-              effectiveServiceConfig = EMPTY_SERVICE_CONFIG;
-              realChannel.updateConfigSelector(null);
-            }
-            if (!effectiveServiceConfig.equals(lastServiceConfig)) {
-              channelLogger.log(
-                  ChannelLogLevel.INFO,
-                  "Service config changed{0}",
-                  effectiveServiceConfig == EMPTY_SERVICE_CONFIG ? " to empty" : "");
-              lastServiceConfig = effectiveServiceConfig;
-              transportProvider.throttle = effectiveServiceConfig.getRetryThrottling();
-            }
-
-            try {
-              // TODO(creamsoup): when `servers` is empty and lastResolutionStateCopy == SUCCESS
-              //  and lbNeedAddress, it shouldn't call the handleServiceConfigUpdate. But,
-              //  lbNeedAddress is not deterministic
-              serviceConfigUpdated = true;
-            } catch (RuntimeException re) {
-              logger.log(
-                  Level.WARNING,
-                  "[" + getLogId() + "] Unexpected exception from parsing service config",
-                  re);
-            }
-          }
 
           Attributes effectiveAttrs = resolutionResult.getAttributes();
           // Call LB only if it's not shutdown.  If LB is shutdown, lbHelper won't match.
@@ -515,3 +354,86 @@ start方法不能抛出任何异常，如果有异常改为调用listener的onEr
   }
 
 ```
+
+获取到解析的结果后回调listener的onResult方法，如果失败了回调onError，无论哪种情况最终都会通知到`helper.lb`，也就是负载均衡器。
+
+```java
+@ExperimentalApi("https://github.com/grpc/grpc-java/issues/1770")
+public abstract class NameResolver {
+
+    @ExperimentalApi("https://github.com/grpc/grpc-java/issues/1770")
+    public static final class ResolutionResult {
+        private final List<EquivalentAddressGroup> addresses;
+        private final Attributes attributes;
+        @Nullable
+        private final ConfigOrError serviceConfig;
+    }
+
+}
+```
+
+在解析的结果中出了常规的地址和属性，还有一个`serviceConfig`服务配置信息，这个信息的组织有很大的自由度。
+
+控制serviceConfig处理的参数: `lookUpServiceConfig`是否解析服务配置，默认为true，如果设为false的话，将会使用`defaultServiceConfig`或`EMPTY_SERVICE_CONFIG`。
+
+serviceConfig的使用比较分散，不像addresses和attributes只传给了 lb：
+* RetryThrottling 传给了`transportProvider.throttle`
+* DefaultConfigSelector 传给了`realChannel.updateConfigSelector`
+* LoadBalancingConfig 设置为了ResolvedAddresses的`LoadBalancingPolicyConfig`
+* HealthCheckingConfig 设置为了ResolvedAddresses的一个attribute
+
+## idleTimer
+
+一般情况`NameResolver`只会构建一个，但是也有例外的情况，如果设置了`idleTimeoutMillis`，那么在超过了该时间后就会回到IDLE状态。
+
+实现idle状态切换主要依赖两个组件：
+1. inUseStateAggregator (IdleModeStateAggregator) 用于追踪channel是否在使用，如果从0->1在使用回调`handleInUse()`，如果从1->0不用了回调`handleNotInUse()`
+2. idleTimer (Rescheduler) 计时器，设置`idleTimeoutMillis`延迟，到达时间了将会回调`IdleModeTimer`
+
+
+```java
+  /**
+   * Must be accessed from syncContext.
+   */
+  private final class IdleModeStateAggregator extends InUseStateAggregator<Object> {
+    @Override
+    protected void handleInUse() {
+      exitIdleMode();
+    }
+
+    @Override
+    protected void handleNotInUse() {
+      if (shutdown.get()) {
+        return;
+      }
+      rescheduleIdleTimer();
+    }
+  }
+
+  // Run from syncContext
+  private class IdleModeTimer implements Runnable {
+
+    @Override
+    public void run() {
+      // Workaround timer scheduled while in idle mode. This can happen from handleNotInUse() after
+      // an explicit enterIdleMode() by the user. Protecting here as other locations are a bit too
+      // subtle to change rapidly to resolve the channel panic. See #8714
+      if (lbHelper == null) {
+        return;
+      }
+      enterIdleMode();
+    }
+  }
+```
+
+虽然这个idle检测默认是关闭的，但是比较优雅的`NameResolver`的实现需要在提供start开启，shutdown关闭的对称逻辑。
+
+
+## refresh
+
+提示`NameResolver`进行refresh，通常来说这是个空实现，因为大部分地址发现都是监听机制，有变更就回调listener了。
+
+有两处地方调用refresh：
+1. `RetryingNameResolver` 
+
+
