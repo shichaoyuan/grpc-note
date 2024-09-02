@@ -434,6 +434,8 @@ serviceConfig的使用比较分散，不像addresses和attributes只传给了 lb
 提示`NameResolver`进行refresh，通常来说这是个空实现，因为大部分地址发现都是监听机制，有变更就回调listener了。
 
 有两处地方调用refresh：
-1. `RetryingNameResolver` 
+1. `RetryingNameResolver` onError或者onResult处理异常的时候进行重试
+2. `LoadBalancer.Helper` 的 refreshNameResolution
+
 
 
