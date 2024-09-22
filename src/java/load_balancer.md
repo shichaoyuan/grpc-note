@@ -139,3 +139,81 @@
 
 ## LoadBalancer
 
+LoadBalancer通常情况需要实现这几个方法。
+
+```java
+@ExperimentalApi("https://github.com/grpc/grpc-java/issues/1771")
+@NotThreadSafe
+public abstract class LoadBalancer {
+
+  /**
+   * Accepts newly resolved addresses from the name resolution system. The {@link
+   * EquivalentAddressGroup} addresses should be considered equivalent but may be flattened into a
+   * single list if needed.
+   *
+   * <p>Implementations can choose to reject the given addresses by returning {@code false}.
+   *
+   * <p>Implementations should not modify the given {@code addresses}.
+   *
+   * @param resolvedAddresses the resolved server addresses, attributes, and config.
+   * @return {@code true} if the resolved addresses were accepted. {@code false} if rejected.
+   * @since 1.49.0
+   */
+  public Status acceptResolvedAddresses(ResolvedAddresses resolvedAddresses) {
+    if (resolvedAddresses.getAddresses().isEmpty()
+        && !canHandleEmptyAddressListFromNameResolution()) {
+      Status unavailableStatus = Status.UNAVAILABLE.withDescription(
+              "NameResolver returned no usable address. addrs=" + resolvedAddresses.getAddresses()
+                      + ", attrs=" + resolvedAddresses.getAttributes());
+      handleNameResolutionError(unavailableStatus);
+      return unavailableStatus;
+    } else {
+      if (recursionCount++ == 0) {
+        handleResolvedAddresses(resolvedAddresses);
+      }
+      recursionCount = 0;
+
+      return Status.OK;
+    }
+  }
+
+  /**
+   * Handles an error from the name resolution system.
+   *
+   * @param error a non-OK status
+   * @since 1.2.0
+   */
+  public abstract void handleNameResolutionError(Status error);
+
+
+
+
+}
+
+```
+
+然后创建对应的`Picker`，也就是选择算法。
+
+```java
+  /**
+   * The main balancing logic.
+   * 
+   * 必须实现为线程安全的。
+   *
+   * @since 1.2.0
+   */
+  @ThreadSafe
+  @ExperimentalApi("https://github.com/grpc/grpc-java/issues/1771")
+  public abstract static class SubchannelPicker {
+    /**
+     * Make a balancing decision for a new RPC.
+     *
+     * @param args the pick arguments
+     * @since 1.3.0
+     */
+    public abstract PickResult pickSubchannel(PickSubchannelArgs args);
+
+  }
+```
+
+最后回调helper的`updateBalancingState`方法。
