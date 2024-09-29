@@ -139,3 +139,58 @@ message DiscoveryResponse {
   config.core.v3.ControlPlane control_plane = 6;
 }
 ```
+
+**ACK**
+
+回复V=X表示接受配置。
+
+![ACK机制](images/ack.png)
+
+**NACK**
+
+如果不接受配置，那么客户端回复NACK，也就是附上`error_detail`。
+
+![NACK机制](images/nack.png)
+
+每种resource type对应一个版本号。
+
+**总结**
+* xDS客户端必须`ACK`或者`NACK`每一个`DiscoveryResponse`，`response_nonce`关联对应的响应。
+* ACK标识成功的配置。
+* NACK标识失败的配置，并且在`error_detail`中带上详细信息。`version_info`标识最新使用的版本。
+
+**客户端如何指定返回的资源**
+
+xDS请求运行客户端指定一组资源。SotW协议在`resource_names`字段指定；增量协议通过`e resource_names_subscribe`和`resource_names_unsubscribe`这两个字段指定。
+
+Listener和Cluster这两种资源类型可以通配（*）订阅，此类情况通常基于客户端的`node`标识返回资源。
+
+**客户端行为**
+* Envoy通常是通配订阅Listener和Cluster资源
+* 使用xDS的gRPC客户端通常只用一个listener配置，并且出口配置的资源也是明确的。
+
+### Resource warming
+
+**最终一致性**
+
+请求顺序：
+* CDS updates (if any) must always be pushed first.
+* EDS updates (if any) must arrive after CDS updates for the respective clusters.
+* LDS updates must arrive after corresponding CDS/EDS updates.
+* RDS updates related to the newly added listeners must arrive after CDS/EDS/LDS updates.
+* VHDS updates (if any) related to the newly added RouteConfigurations must arrive after RDS updates.
+* Stale CDS clusters and related EDS endpoints (ones no longer being referenced) can then be removed.
+
+### Aggregated Discovery Service
+
+一个stream，保证上述请求顺序。
+
+### Incremental xDS
+
+//todo
+
+## REST-JSON polling subscriptions
+
+//todo
+
+
