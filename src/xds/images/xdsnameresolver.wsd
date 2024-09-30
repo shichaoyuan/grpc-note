@@ -1,0 +1,50 @@
+@startuml
+
+
+interface XdsClientPoolFactory {
+  +getOrCreate()
+}
+class SharedXdsClientPoolProvider
+abstract class XdsClient <ObjectPool>
+class XdsClientImpl <RefCountedXdsClientObjectPool> {
+  -resourceSubscribers[type][name]
+  -serverCpClientMap[serverInfo]
+}
+abstract class Bootstrapper
+abstract class ServerInfo
+abstract class BootstrapperImpl
+class GrpcBootstrapperImpl
+interface XdsTransportFactory {
+  +create()
+}
+class GrpcXdsTransportFactory
+interface XdsTransport
+class GrpcXdsTransport
+abstract class BootstrapInfo
+class ResourceSubscriber
+class ControlPlaneClient
+abstract class ManagedChannel
+class AdsStream
+
+ResourceSubscriber *-- ControlPlaneClient
+ControlPlaneClient *-- XdsTransport
+ControlPlaneClient *-- ServerInfo
+ControlPlaneClient *-- AdsStream
+XdsClientImpl *-- ResourceSubscriber
+XdsClientImpl *-- ControlPlaneClient
+XdsClientImpl *-- XdsTransportFactory
+XdsClientImpl *-- BootstrapInfo
+XdsClientPoolFactory <|-- SharedXdsClientPoolProvider
+XdsClientPoolFactory -> XdsClient : create
+Bootstrapper <|-- BootstrapperImpl
+Bootstrapper -> BootstrapInfo : create
+SharedXdsClientPoolProvider *-- Bootstrapper
+XdsClient <|-- XdsClientImpl
+BootstrapperImpl <|-- GrpcBootstrapperImpl
+XdsTransportFactory <|-- GrpcXdsTransportFactory
+XdsTransport <|-- GrpcXdsTransport
+GrpcXdsTransport *-- ManagedChannel
+XdsTransportFactory -> XdsTransport : create
+
+
+@enduml

@@ -6,3 +6,4 @@
 - [xDS](xds/README.md)
     - [API概述](xds/api_overview.md)
     - [协议概述](xds/protocol_overview.md)
+    - [XdsNameResolver(Java)](xds/xdsnameresolver_java.md)

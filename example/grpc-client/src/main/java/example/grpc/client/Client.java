@@ -11,7 +11,7 @@ import io.grpc.xds.XdsNameResolverProvider;
 
 public class Client {
     public static void main(String[] args) {
-        System.setProperty("io.grpc.xds.bootstrap", "/Users/momo/projects/xds-example/grpc-client/bootstrap.json");
+        System.setProperty("io.grpc.xds.bootstrap", "./bootstrap.json");
 
         NameResolverRegistry.getDefaultRegistry().register(new XdsNameResolverProvider());
 
