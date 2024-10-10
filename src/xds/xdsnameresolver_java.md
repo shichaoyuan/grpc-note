@@ -189,6 +189,63 @@ Java版本的grpc-xds使用的是ADS，资源的调用顺序与[envoy文档](htt
   }
 ```
 
+解析后的`BootstrapInfo`主要包含：
+```json
+{
+  "xds_servers": [
+    {
+      "server_uri": "value",
+      "channel_creds": [
+        {
+          "type": "value",
+          "config" {}
+        }
+      ],
+      "server_features": [
+        "value"
+      ]
+    }
+  ],
+  "node": {
+    "id": "value",
+    "cluster": "value",
+    "metadata": {},
+    "locality": {
+      "region": "value",
+      "zone": "value",
+      "sub_zone": "value"
+    }
+  },
+  "certificate_providers": {
+    "name": {
+      "plugin_name": "value",
+      "config": {}
+    }
+  },
+  "server_listener_resource_name_template": "value",
+  "client_default_listener_resource_name_template": "value",
+  "authorities": {
+    "name": {
+      "client_listener_resource_name_template": "value",
+      "xds_servers": [
+      ]
+    }
+  }
+}
+```
+在authorities中，client_listener_resource_name_template如果没有设置，那么默认值为xdstp://authorityName/envoy.config.listener.v3.Listener/%s；client_default_listener_resource_name_template的默认值是%s。
+
+实际上authorities的引入比较晚，在[gRPC A47](https://github.com/grpc/proposal/blob/master/A47-xds-federation.md)中，主要是为了支持不同的资源能够访问不同的xDS服务器，没有这一特性之前只能访问默认的xds_servers。
+
+这两个信息影响着`XdsNameResolver`在start中的`ldsResourceName`的设定，假设设置的target为xds:///greeter-s003，那么`targetAuthority`就是空的，`serviceAuthority`就是greeter-s003，这里总结一些不同情况的处理：
+1. targetAuthority为空
+  1. clientDefaultListenerResourceNameTemplate为默认值
+2. targetAuthority不为空
+
+
+
+
+
 
 
 
