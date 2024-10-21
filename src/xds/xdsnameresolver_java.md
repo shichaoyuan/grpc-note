@@ -239,21 +239,60 @@ Java版本的grpc-xds使用的是ADS，资源的调用顺序与[envoy文档](htt
 
 这两个信息影响着`XdsNameResolver`在start中的`ldsResourceName`的设定，假设设置的target为xds:///greeter-s003，那么`targetAuthority`就是空的，`serviceAuthority`就是greeter-s003，这里总结一些不同情况的处理：
 1. targetAuthority为空
-  1. clientDefaultListenerResourceNameTemplate为默认值
+  1. clientDefaultListenerResourceNameTemplate为默认值，那么ldsResourceName就是`serviceAuthority`
+  2. 如果是以xdstp:开头，那么ldsResourceName就是xdstp:///envoy.config.listener.v3.Listener/xxx
 2. targetAuthority不为空
+  1. 那么从authorities中匹配clientListenerResourceNameTemplate，然后逻辑与上面一致
 
+## ResolveState
 
+在`start`过程中首先监听的是LDS。
 
+```java
+    private void start() {
+      logger.log(XdsLogLevel.INFO, "Start watching LDS resource {0}", ldsResourceName);
+      xdsClient.watchXdsResource(XdsListenerResource.getInstance(),
+          ldsResourceName, this, syncContext);
+    }
+```
 
+`watchXdsResource`是监听xds变更的通用方法，其第一个参数就是资源类型，目前在代码中实现了四种资源类型：
+1. `XdsListenerResource` "type.googleapis.com/envoy.config.listener.v3.Listener"
+2. `XdsRouteConfigureResource` "type.googleapis.com/envoy.config.route.v3.RouteConfiguration"
+3. `XdsClusterResource` "type.googleapis.com/envoy.config.cluster.v3.Cluster"
+4. `XdsEndpointResource` "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment"
 
+在`XdsClientImpl`使用了一个Map维护订阅者的关系：
+```java
+  @Override
+  public <T extends ResourceUpdate> void watchXdsResource(XdsResourceType<T> type,
+      String resourceName,
+      ResourceWatcher<T> watcher,
+      Executor watcherExecutor) {
+    syncContext.execute(new Runnable() {
+      @Override
+      @SuppressWarnings("unchecked")
+      public void run() {
+        if (!resourceSubscribers.containsKey(type)) {
+          resourceSubscribers.put(type, new HashMap<>());
+          subscribedResourceTypeUrls.put(type.typeUrl(), type);
+        }
+        ResourceSubscriber<T> subscriber =
+            (ResourceSubscriber<T>) resourceSubscribers.get(type).get(resourceName);
+        if (subscriber == null) {
+          logger.log(XdsLogLevel.INFO, "Subscribe {0} resource {1}", type, resourceName);
+          subscriber = new ResourceSubscriber<>(type, resourceName);
+          resourceSubscribers.get(type).put(resourceName, subscriber);
+          if (subscriber.controlPlaneClient != null) {
+            subscriber.controlPlaneClient.adjustResourceSubscription(type);
+          }
+        }
+        subscriber.addWatcher(watcher, watcherExecutor);
+      }
+    });
+  }
+```
+也就是每个资源有唯一一个对应的`ResourceSubscriber`，但是每个subscriber可以添加多个`ResourceWatcher`。
 
-
-
-
-
-
-
-
-
-
+在构建`ResourceSubscriber`时最重要的从配置中获取对应的xdsServer，然后构建具体的xdsTransport。
 
