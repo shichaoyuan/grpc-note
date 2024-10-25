@@ -294,5 +294,32 @@ Java版本的grpc-xds使用的是ADS，资源的调用顺序与[envoy文档](htt
 ```
 也就是每个资源有唯一一个对应的`ResourceSubscriber`，但是每个subscriber可以添加多个`ResourceWatcher`。
 
-在构建`ResourceSubscriber`时最重要的从配置中获取对应的xdsServer，然后构建具体的xdsTransport。
+在构建`ResourceSubscriber`时最重要的从配置中获取对应的xdsServer，然后构建具体的controlPlaneClient。
 
+controlPlaneClient的使用是在`ResourceSubscriber`，但是维护还是在`XdsClientImpl`中的serverCpClientMap，每个xdsServer对应一个单例。
+
+## ControlPlaneClient
+
+在`ControlPlaneClient`中对于xds连接的封装是`GrpcXdsTransport`，实际上就是`ManagedChannel`，在此之上`AdsStream`分装了协议相关的处理逻辑。
+
+ADS协议是在一个stream上订阅所有的资源，所以当变更时需要重新订阅，也就是`adjustResourceSubscription`,adsStream.sendDiscoveryRequest发送请求后，正常情况将会收到响应进入`handleRpcResponse`处理逻辑：
+
+```java
+    final void handleRpcResponse(XdsResourceType<?> type, String versionInfo, List<Any> resources,
+                                 String nonce) {
+      checkNotNull(type, "type");
+      if (closed) {
+        return;
+      }
+      responseReceived = true;
+      respNonces.put(type, nonce);
+      ProcessingTracker processingTracker = new ProcessingTracker(
+          () -> call.startRecvMessage(), syncContext);
+      xdsResponseHandler.handleResourceResponse(type, serverInfo, versionInfo, resources, nonce,
+          processingTracker);
+      processingTracker.onComplete();
+    }
+```
+`handleResourceResponse`的逻辑回调到了`XdsClientImpl`中，在这里会根据解析的结果再调用`ControlPlaneClient`进行ack或者nack。
+
+对于异常情况，在`ControlPlaneClient`中有个`rpcRetryTimer`驱动进行重试，创建新的stream，发送DS请求。
