@@ -319,7 +319,33 @@ ADS协议是在一个stream上订阅所有的资源，所以当变更时需要�
           processingTracker);
       processingTracker.onComplete();
     }
-```
+```AdsStream
 `handleResourceResponse`的逻辑回调到了`XdsClientImpl`中，在这里会根据解析的结果再调用`ControlPlaneClient`进行ack或者nack。
 
 对于异常情况，在`ControlPlaneClient`中有个`rpcRetryTimer`驱动进行重试，创建新的stream，发送DS请求。
+
+## ResourceWatcher
+
+ADS收到响应后的调用链为：
+```
+EventHandlerToCallListenerAdapter#onMessage
+ -> AdsStream#onRecvMessage
+   -> XdsClientImpl#handleResourceResponse
+     -> XdsClientImpl#handleResourceUpdate
+       -> ResourceSubscriber#onData
+       -> ResourceSubscriber#onReject
+```
+
+AdsStream中respNonces维护的粒度是XdsResourceType.
+
+在handleResourceResponse中toParseResourceNames有两种情况
+1. lds和rds为false，也就是null
+2. cds和eds为true，也就是从resourceSubscribers获取
+
+handleResourceUpdate的逻辑比较重，主干逻辑为：
+1. 解析DiscoveryResponse中的资源，xdsResourceType.parse(args, resources);
+2. 如果没有错误那么ack，如果有错误那么nack
+3. 对于parsedResource回调onData，对于invalidResources回调onReject
+
+另外isFullStateOfTheWorld这个判断并不是判断SoTW，这里的交互都是SoTW，只是lds、rds与cds、eds的行为不一样，前者总是返回全量，后者仅返回变更的。
+
