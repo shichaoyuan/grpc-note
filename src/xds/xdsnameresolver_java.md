@@ -333,6 +333,7 @@ EventHandlerToCallListenerAdapter#onMessage
    -> XdsClientImpl#handleResourceResponse
      -> XdsClientImpl#handleResourceUpdate
        -> ResourceSubscriber#onData
+         -> ResourceWatcher#onChanged
        -> ResourceSubscriber#onReject
 ```
 
@@ -348,4 +349,36 @@ handleResourceUpdate的逻辑比较重，主干逻辑为：
 3. 对于parsedResource回调onData，对于invalidResources回调onReject
 
 另外isFullStateOfTheWorld这个判断并不是判断SoTW，这里的交互都是SoTW，只是lds、rds与cds、eds的行为不一样，前者总是返回全量，后者仅返回变更的。
+
+### LDS - ResolveState
+
+LDS变更最终回调的是ResolveState
+
+对于ApiListener的场景，主要的信息就是HttpConnectionManager。在hcm中可能有静态的VirtualHost，也能需要再发起RDS请求。
+
+```
+api.v2.RouteConfiguration route_config = 4;
+  -> repeated route.VirtualHost virtual_hosts = 2;
+  -> repeated ClusterSpecifierPlugin cluster_specifier_plugins = 12;
+
+repeated HttpFilter http_filters = 5;
+
+api.v2.core.HttpProtocolOptions common_http_protocol_options = 35;
+  -> google.protobuf.Duration max_stream_duration = 4;
+
+```
+
+### RDS - ResolveState or RouteDiscoveryState
+
+RDS最终回调的是XdsNameResolver.ResolveState#updateRoutes。
+
+首先通过domain和serviceAuthority筛选出一个VirtualHost，具体的规则在RoutingUtils#findVirtualHostForHostName
+
+```
+// Domain search order:
+//  1. Exact domain names: ``www.foo.com``.
+//  2. Suffix domain wildcards: ``*.foo.com`` or ``*-bar.foo.com``.
+//  3. Prefix domain wildcards: ``foo.*`` or ``foo-*``.
+//  4. Special wildcard ``*`` matching any domain.
+```
 
