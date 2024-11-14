@@ -319,7 +319,7 @@ ADS协议是在一个stream上订阅所有的资源，所以当变更时需要�
           processingTracker);
       processingTracker.onComplete();
     }
-```AdsStream
+```
 `handleResourceResponse`的逻辑回调到了`XdsClientImpl`中，在这里会根据解析的结果再调用`ControlPlaneClient`进行ack或者nack。
 
 对于异常情况，在`ControlPlaneClient`中有个`rpcRetryTimer`驱动进行重试，创建新的stream，发送DS请求。
@@ -382,3 +382,22 @@ RDS最终回调的是XdsNameResolver.ResolveState#updateRoutes。
 //  4. Special wildcard ``*`` matching any domain.
 ```
 
+最终只会获取一个VirtualHost，在其中有一组Route，一个Route可以是一个cluster，也可以是一组weightedCluster
+
+```java
+    ConfigOrError parsedServiceConfig = serviceConfigParser.parseServiceConfig(rawServiceConfig);
+    Attributes attrs =
+        Attributes.newBuilder()
+            .set(InternalXdsAttributes.XDS_CLIENT_POOL, xdsClientPool)
+            .set(InternalXdsAttributes.CALL_COUNTER_PROVIDER, callCounterProvider)
+            .set(InternalConfigSelector.KEY, configSelector)
+            .build();
+    ResolutionResult result =
+        ResolutionResult.newBuilder()
+            .setAttributes(attrs)
+            .setServiceConfig(parsedServiceConfig)
+            .build();
+    listener.onResult(result);
+```
+
+这些cluster打包到了serviceConfig作为ResolutionResult传给了NameResolver.Listener2，也就是LoadBalancer部分了。
