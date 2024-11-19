@@ -401,3 +401,39 @@ RDS最终回调的是XdsNameResolver.ResolveState#updateRoutes。
 ```
 
 这些cluster打包到了serviceConfig作为ResolutionResult传给了NameResolver.Listener2，也就是LoadBalancer部分了。
+
+由前可知最终回调到了AutoConfiguredLoadBalancer#tryAcceptResolvedAddresses，很现在这里不是静态的LB构建，而是低于serviceConfgig动态构建的。
+
+result的"internal:io.grpc.config-selector"属性为configSelector，也就是XdsNameResolver.ConfigSelector。
+
+serviceConfig业务就是：
+```json
+{
+  "loadBalancingConfig": [
+    "cluster_manager_experimental":
+    {
+      "childPolicy":
+      {
+        "#clusterName":
+        {
+          "lbPolicy": [
+            {
+              "cds_experimental":
+              {
+                "cluster": "#clusterName"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+io.grpc.internal.AutoConfiguredLoadBalancerFactory#parseLoadBalancerPolicy对该配置进行解析，在io.grpc.internal.ServiceConfigUtil#selectLbPolicyFromList中根据policyName从`LoadBalancerRegistry`获取了对应的LoadBalancerProvider。
+
+也就是io.grpc.xds.ClusterManagerLoadBalancerProvider#parseLoadBalancingPolicyConfig进一步解析了childPolicy；然后由io.grpc.xds.CdsLoadBalancerProvider#parseLoadBalancingPolicyConfig进一步解析，最终是一个io.grpc.xds.CdsLoadBalancerProvider.CdsConfig,provider是io.grpc.xds.CdsLoadBalancerProvider。
+
+此时生成的LB为io.grpc.xds.CdsLoadBalancer2#CdsLoadBalancer2(io.grpc.LoadBalancer.Helper)，它再进一步acceptResolvedAddresses，`CdsLbState`进一步start。
+
