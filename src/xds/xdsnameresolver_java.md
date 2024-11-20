@@ -437,3 +437,16 @@ io.grpc.internal.AutoConfiguredLoadBalancerFactory#parseLoadBalancerPolicy对该
 
 此时生成的LB为io.grpc.xds.CdsLoadBalancer2#CdsLoadBalancer2(io.grpc.LoadBalancer.Helper)，它再进一步acceptResolvedAddresses，`CdsLbState`进一步start。
 
+### CDS - CdsLoadBalancer2.CdsLbState.ClusterState
+
+在io.grpc.xds.CdsLoadBalancer2.CdsLbState#handleClusterDiscovered中相应地址变更，获取cluster_resolver_experimental对应的`ClusterResolverLoadBalancer`，在其acceptResolvedAddresses方法中又创建了 ClusterResolverLbStateFactory。
+
+进一步创建了ClusterResolverLbState。
+
+
+### EDS - EdsClusterState
+
+io.grpc.xds.ClusterResolverLoadBalancer.ClusterResolverLbState#handleEndpointResourceUpdate
+
+priority_experimental对应PriorityLoadBalancerProvider，创建io.grpc.xds.PriorityLoadBalancer
+
